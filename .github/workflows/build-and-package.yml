@@ -1,0 +1,103 @@
+name: Build Rust Project and Prepare AUR Package
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+env:
+  CARGO_TERM_COLOR: always
+  # 定义AUR包名，可根据需要修改，通常为项目名加 -bin 后缀
+  AUR_PACKAGE_NAME: guess-number-bin
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 设置Rust工具链
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+          components: rustfmt, clippy
+
+      # 2. 缓存Cargo依赖，加速构建
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # 3. 检查代码格式（可选）
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      # 4. 运行Clippy检查（可选）
+      - name: Lint with clippy
+        run: cargo clippy -- -D warnings
+
+      # 5. 运行测试（你的项目目前没有测试，但这是好习惯）
+      - name: Run tests
+        run: cargo test --verbose
+
+      # 6. 构建Release版本
+      - name: Build release binary
+        run: cargo build --release --verbose
+
+      # 7. 上传构建产物（二进制文件）作为Artifact
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: guess-number-binary
+          path: target/release/guess-number
+
+  # 第二个job：准备AUR包
+  prepare-aur-package:
+    needs: build-and-test # 等待构建测试完成
+    runs-on: ubuntu-latest
+    # 仅在推送到master分支时执行（可选，PR不执行打包）
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      # 安装 cargo-aur 工具
+      - name: Install cargo-aur
+        run: cargo install cargo-aur
+
+      # 生成 PKGBUILD 和源码包
+      - name: Generate AUR package files
+        run: cargo aur
+
+      # 列出生成的文件以便调试
+      - name: List generated files
+        run: ls -la target/cargo-aur/
+
+      # 准备AUR包目录结构
+      - name: Prepare AUR package directory
+        run: |
+          mkdir -p aur-package
+          cp target/cargo-aur/PKGBUILD aur-package/
+          cp target/cargo-aur/*.tar.gz aur-package/ || true  # 如果生成了源码包则复制
+
+      # 生成 .SRCINFO 文件（AUR需要）
+      - name: Generate .SRCINFO
+        run: |
+          cd aur-package
+          makepkg --printsrcinfo > .SRCINFO
+
+      # 上传准备好的AUR包文件作为Artifact
+      - name: Upload AUR package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aur-package-files
+          path: aur-package/
