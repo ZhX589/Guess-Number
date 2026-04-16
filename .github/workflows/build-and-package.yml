@@ -12,7 +12,7 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 关键：允许创建 Release
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -58,12 +58,20 @@ jobs:
     needs: build-and-release
     permissions:
       contents: write
+    container:
+      image: archlinux:latest
+      options: --user root
     steps:
       - uses: actions/checkout@v4
 
       - name: Get version
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git rust cargo
 
       - name: Install cargo-aur
         run: cargo install cargo-aur
