@@ -1,32 +1,34 @@
-name: Build Rust Project and Prepare AUR Package
+name: Release Build
 
 on:
   push:
-    branches: ["master"]
-  pull_request:
-    branches: ["master"]
+    tags:
+      - "v*" # 当推送以 'v' 开头的标签时触发，如 v1.0.0, v2.1.3
 
 env:
   CARGO_TERM_COLOR: always
-  # 定义AUR包名，可根据需要修改，通常为项目名加 -bin 后缀
-  AUR_PACKAGE_NAME: guess-number-bin
 
 jobs:
-  build-and-test:
+  # 主构建任务：构建二进制文件并创建 Release
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # 1. 设置Rust工具链
+      # 提取版本号（去掉 'v' 前缀）
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      # 设置 Rust 工具链
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           profile: minimal
           override: true
-          components: rustfmt, clippy
 
-      # 2. 缓存Cargo依赖，加速构建
+      # 缓存 Cargo 依赖
       - name: Cache cargo registry
         uses: actions/cache@v3
         with:
@@ -38,66 +40,101 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # 3. 检查代码格式（可选）
-      - name: Check formatting
-        run: cargo fmt -- --check
-
-      # 4. 运行Clippy检查（可选）
-      - name: Lint with clippy
-        run: cargo clippy -- -D warnings
-
-      # 5. 运行测试（你的项目目前没有测试，但这是好习惯）
-      - name: Run tests
-        run: cargo test --verbose
-
-      # 6. 构建Release版本
+      # 构建 Release 二进制文件
       - name: Build release binary
         run: cargo build --release --verbose
 
-      # 7. 上传构建产物（二进制文件）作为Artifact
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: guess-number-binary
-          path: target/release/guess-number
+      # 准备二进制文件（重命名以包含版本号）
+      - name: Prepare binary
+        run: |
+          mkdir -p artifacts
+          cp target/release/guess-number artifacts/guess-number-${{ steps.get_version.outputs.VERSION }}
 
-  # 第二个job：准备AUR包
+      # 创建 GitHub Release
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "Release ${{ steps.get_version.outputs.VERSION }}"
+          tag_name: ${{ github.ref_name }}
+          body: |
+            ## 🎉 Release ${{ steps.get_version.outputs.VERSION }}
+
+            ### 📦 安装方法
+
+            **直接下载二进制文件**：
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/guess-number-${{ steps.get_version.outputs.VERSION }}
+            chmod +x guess-number-${{ steps.get_version.outputs.VERSION }}
+            ./guess-number-${{ steps.get_version.outputs.VERSION }}
+            ```
+
+            **通过 AUR 安装（Arch Linux）**：
+            ```bash
+            yay -S guess-number-bin
+            ```
+
+            ### 🔧 本次更新内容
+            - 基于 commit: ${{ github.sha }}
+            - 自动构建 Release 版本
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/guess-number-${{ steps.get_version.outputs.VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 准备 AUR 包文件（作为 artifact 上传，供手动发布）
   prepare-aur-package:
-    needs: build-and-test # 等待构建测试完成
     runs-on: ubuntu-latest
-    # 仅在推送到master分支时执行（可选，PR不执行打包）
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build-and-release # 等待 Release 创建完成
     steps:
       - uses: actions/checkout@v4
 
-      # 安装 cargo-aur 工具
+      # 提取版本号
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      # 安装 cargo-aur
       - name: Install cargo-aur
         run: cargo install cargo-aur
 
-      # 生成 PKGBUILD 和源码包
+      # 生成 AUR 包文件
       - name: Generate AUR package files
         run: cargo aur
 
-      # 列出生成的文件以便调试
-      - name: List generated files
-        run: ls -la target/cargo-aur/
-
-      # 准备AUR包目录结构
-      - name: Prepare AUR package directory
+      # 重命名并整理 AUR 包文件
+      - name: Organize AUR files
         run: |
-          mkdir -p aur-package
-          cp target/cargo-aur/PKGBUILD aur-package/
-          cp target/cargo-aur/*.tar.gz aur-package/ || true  # 如果生成了源码包则复制
-
-      # 生成 .SRCINFO 文件（AUR需要）
-      - name: Generate .SRCINFO
-        run: |
-          cd aur-package
+          mkdir aur-artifacts
+          cp target/cargo-aur/PKGBUILD aur-artifacts/
+          # 重命名 PKGBUILD 以包含版本信息（可选）
+          cp target/cargo-aur/PKGBUILD aur-artifacts/PKGBUILD-${{ steps.get_version.outputs.VERSION }}
+          # 如果有生成的 .tar.gz 源码包，也复制过来
+          if ls target/cargo-aur/*.tar.gz 1> /dev/null 2>&1; then
+            cp target/cargo-aur/*.tar.gz aur-artifacts/
+          fi
+          # 生成 .SRCINFO
+          cd aur-artifacts
           makepkg --printsrcinfo > .SRCINFO
+          cp .SRCINFO .SRCINFO-${{ steps.get_version.outputs.VERSION }}
 
-      # 上传准备好的AUR包文件作为Artifact
-      - name: Upload AUR package artifact
+      # 上传 AUR 包文件作为 Workflow Artifact
+      - name: Upload AUR package artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aur-package-files
-          path: aur-package/
+          name: aur-package-files-${{ steps.get_version.outputs.VERSION }}
+          path: aur-artifacts/
+          retention-days: 90 # 保留90天，方便下载
+
+      # 可选：也将 AUR 包文件附加到 Release
+      - name: Upload PKGBUILD to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            aur-artifacts/PKGBUILD
+            aur-artifacts/.SRCINFO
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
