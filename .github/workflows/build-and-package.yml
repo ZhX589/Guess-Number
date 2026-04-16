@@ -60,7 +60,6 @@ jobs:
       contents: write
     container:
       image: archlinux:latest
-      options: --user root
     steps:
       - uses: actions/checkout@v4
 
@@ -71,20 +70,27 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git rust cargo
+          pacman -S --noconfirm base-devel git rust cargo sudo
 
-      - name: Install cargo-aur
-        run: cargo install cargo-aur
-
-      - name: Generate AUR package files
-        run: cargo aur
-
-      - name: Prepare AUR files
+      - name: Create build user
         run: |
-          mkdir aur-artifacts
-          cp target/cargo-aur/PKGBUILD aur-artifacts/
-          cd aur-artifacts
-          makepkg --printsrcinfo > .SRCINFO
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder:builder .
+
+      - name: Install cargo-aur as builder
+        run: |
+          su builder -c "cargo install cargo-aur"
+
+      - name: Generate AUR package files as builder
+        run: |
+          su builder -c "cargo aur"
+
+      - name: Prepare AUR files as builder
+        run: |
+          su builder -c "mkdir -p aur-artifacts"
+          su builder -c "cp target/cargo-aur/PKGBUILD aur-artifacts/"
+          su builder -c "cd aur-artifacts && makepkg --printsrcinfo > .SRCINFO"
 
       - name: Upload AUR artifacts
         uses: actions/upload-artifact@v4
