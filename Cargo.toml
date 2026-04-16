@@ -2,7 +2,21 @@
 name = "guessing_game"
 version = "0.2.0"
 edition = "2024"
+authors = ["ZhX589 ZhX589@outlook.com"]
+description = "A simple guessing game"
+license = "MIT"  
+repository = "https://github.com/ZhX589/Guess-Number"
+homepage = "https://github.com/ZhX589/Guess-Number"
+readme = "README.md"
 
 [dependencies]
 rand = "0.8.3"
 
+[profile.dev]
+opt-level = 0           # 开发模式，最快编译速度
+debug = true            # 保留调试信息
+
+[profile.release]
+opt-level = 3           # 最高优化，但编译慢
+lto = "thin"           # 链接时优化，减小二进制体积
+codegen-units = 1      # 更好的优化，但编译更慢

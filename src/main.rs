@@ -21,6 +21,7 @@ fn main() {
         let guess: u32 = match guess.trim().parse() {
             Ok(num) => num,
             Err(_) => {
+                cnt -= 1;
                 println!("Please type a number!");
                 continue;
             }
@@ -31,7 +32,6 @@ fn main() {
         match guess.cmp(&secret_number) {
             Ordering::Less => println!("Too small!"),
             Ordering::Equal => {
-                cnt -= 1;
                 println!("You win in {} times!", cnt);
                 break;
             }
