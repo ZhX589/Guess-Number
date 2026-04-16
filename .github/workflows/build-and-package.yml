@@ -3,24 +3,23 @@ name: Release Build
 on:
   push:
     tags:
-      - "v*" # 当推送以 'v' 开头的标签时触发
+      - "v*"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # 主构建任务：构建二进制文件并创建 Release
   build-and-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 关键：允许创建 Release
     steps:
       - uses: actions/checkout@v4
 
-      # 提取版本号（去掉 'v' 前缀）
       - name: Get version
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      # 设置 Rust 工具链
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -28,7 +27,6 @@ jobs:
           profile: minimal
           override: true
 
-      # 缓存 Cargo 依赖
       - name: Cache cargo registry
         uses: actions/cache@v3
         with:
@@ -40,104 +38,57 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # 构建 Release 二进制文件
       - name: Build release binary
         run: cargo build --release --verbose
 
-      # 列出生成的文件（调试）
-      - name: List built binaries
-        run: ls -la target/release/ | grep -E "guessing_game$|^[^.]*$"
-
-      # 准备二进制文件（使用正确的名称）
       - name: Prepare binary
         run: |
           mkdir -p artifacts
-          # 项目名是 guessing_game（下划线）
-          cp target/release/guessing_game "artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}"
+          cp target/release/guessing_game artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}
 
-      # 创建 GitHub Release
       - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          name: "Release ${{ steps.get_version.outputs.VERSION }}"
-          tag_name: ${{ github.ref_name }}
-          body: |
-            ## 🎉 Release ${{ steps.get_version.outputs.VERSION }}
-
-            ### 📦 安装方法
-
-            **直接下载二进制文件**：
-            ```bash
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/guessing_game-${{ steps.get_version.outputs.VERSION }}
-            chmod +x guessing_game-${{ steps.get_version.outputs.VERSION }}
-            ./guessing_game-${{ steps.get_version.outputs.VERSION }}
-            ```
-
-            **通过 AUR 安装（Arch Linux）**：
-            ```bash
-            yay -S guessing_game-bin
-            ```
-
-            ### 🔧 本次更新内容
-            - 基于 commit: ${{ github.sha }}
-            - 自动构建 Release 版本
-          draft: false
-          prerelease: false
           files: |
             artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
 
-  # 准备 AUR 包文件（作为 artifact 上传）
   prepare-aur-package:
     runs-on: ubuntu-latest
     needs: build-and-release
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
-      # 提取版本号
       - name: Get version
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      # 安装 cargo-aur
       - name: Install cargo-aur
         run: cargo install cargo-aur
 
-      # 生成 AUR 包文件
       - name: Generate AUR package files
         run: cargo aur
 
-      # 整理 AUR 包文件
-      - name: Organize AUR files
+      - name: Prepare AUR files
         run: |
           mkdir aur-artifacts
-          # 复制 PKGBUILD
           cp target/cargo-aur/PKGBUILD aur-artifacts/
-          # 复制生成的源码包（如果有）
-          if ls target/cargo-aur/*.tar.gz 1> /dev/null 2>&1; then
-            cp target/cargo-aur/*.tar.gz aur-artifacts/
-          fi
-          # 生成 .SRCINFO
           cd aur-artifacts
           makepkg --printsrcinfo > .SRCINFO
 
-      # 上传 AUR 包文件作为 Workflow Artifact
-      - name: Upload AUR package artifacts
+      - name: Upload AUR artifacts
         uses: actions/upload-artifact@v4
         with:
           name: aur-package-files-${{ steps.get_version.outputs.VERSION }}
           path: aur-artifacts/
           retention-days: 90
 
-      # 可选：也将 AUR 包文件附加到 Release
-      - name: Upload PKGBUILD to Release
-        uses: softprops/action-gh-release@v1
+      - name: Attach AUR files to Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
           files: |
             aur-artifacts/PKGBUILD
             aur-artifacts/.SRCINFO
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
