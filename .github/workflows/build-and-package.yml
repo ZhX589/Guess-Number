@@ -1,34 +1,106 @@
-[package]
-name = "guessing_game"
-version = "0.2.6"
-edition = "2021"
-authors = ["ZhX589 <ZhX589@outlook.com>"]
-description = "A simple guessing game"
-license = "MIT"  
-repository = "https://github.com/ZhX589/Guess-Number"
-homepage = "https://github.com/ZhX589/Guess-Number"
-readme = "README.md"
+name: Release Build
 
-[dependencies]
-rand = "0.8.3"
+on:
+  push:
+    tags:
+      - "v*"
 
-[profile.dev]
-opt-level = 0
-debug = true
+env:
+  CARGO_TERM_COLOR: always
 
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
 
-# deb 包配置
-[package.metadata.deb]
-maintainer = "ZhX589 <ZhX589@outlook.com>"
-copyright = "2026, ZhX589"
-license-file = ["LICENSE", "usr/share/doc/guessing_game/LICENSE"]
-depends = "libc6"
-section = "games"
-priority = "optional"
-assets = [
-    ["target/release/guessing_game", "usr/bin/", "755"],
-]
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --verbose
+
+      - name: Prepare binary and tar.gz
+        run: |
+          mkdir -p artifacts
+          # 复制二进制文件
+          cp target/release/guessing_game artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}
+          # 创建 tar.gz 包
+          cd artifacts
+          tar -czf guessing_game-${{ steps.get_version.outputs.VERSION }}.tar.gz guessing_game-${{ steps.get_version.outputs.VERSION }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}.tar.gz
+          generate_release_notes: true
+
+  build-deb:
+    runs-on: ubuntu-latest
+    needs: build-and-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-deb-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-deb-
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build deb package
+        run: cargo deb
+
+      - name: Rename deb package
+        run: |
+          # cargo-deb 默认生成的文件名格式：package名_version_架构.deb
+          mv target/debian/*.deb artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}.deb
+
+      - name: Upload deb to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}.deb
+          generate_release_notes: true
