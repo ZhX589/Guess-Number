@@ -1,108 +1,34 @@
-name: Release Build
+[package]
+name = "guessing_game"
+version = "0.2.6"
+edition = "2021"
+authors = ["ZhX589 <ZhX589@outlook.com>"]
+description = "A simple guessing game"
+license = "MIT"  
+repository = "https://github.com/ZhX589/Guess-Number"
+homepage = "https://github.com/ZhX589/Guess-Number"
+readme = "README.md"
 
-on:
-  push:
-    tags:
-      - "v*"
+[dependencies]
+rand = "0.8.3"
 
-env:
-  CARGO_TERM_COLOR: always
+[profile.dev]
+opt-level = 0
+debug = true
 
-jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
 
-      - name: Get version
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Build release binary
-        run: cargo build --release --verbose
-
-      - name: Prepare binary
-        run: |
-          mkdir -p artifacts
-          cp target/release/guessing_game artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/guessing_game-${{ steps.get_version.outputs.VERSION }}
-          generate_release_notes: true
-
-  prepare-aur-package:
-    runs-on: ubuntu-latest
-    needs: build-and-release
-    permissions:
-      contents: write
-    container:
-      image: archlinux:latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Get version
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Install dependencies
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git rust cargo sudo
-
-      - name: Create build user
-        run: |
-          useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown -R builder:builder .
-
-      - name: Install cargo-aur as builder
-        run: |
-          su builder -c "cargo install cargo-aur"
-
-      - name: Generate AUR package files as builder
-        run: |
-          su builder -c "cargo aur"
-
-      - name: Prepare AUR files as builder
-        run: |
-          su builder -c "mkdir -p aur-artifacts"
-          su builder -c "cp target/cargo-aur/PKGBUILD aur-artifacts/"
-          su builder -c "cd aur-artifacts && makepkg --printsrcinfo > .SRCINFO"
-
-      - name: Upload AUR artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: aur-package-files-${{ steps.get_version.outputs.VERSION }}
-          path: aur-artifacts/
-          retention-days: 90
-
-      - name: Attach AUR files to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            aur-artifacts/PKGBUILD
-            aur-artifacts/.SRCINFO
-          generate_release_notes: true
+# deb 包配置
+[package.metadata.deb]
+maintainer = "ZhX589 <ZhX589@outlook.com>"
+copyright = "2026, ZhX589"
+license-file = ["LICENSE", "usr/share/doc/guessing_game/LICENSE"]
+depends = "libc6"
+section = "games"
+priority = "optional"
+assets = [
+    ["target/release/guessing_game", "usr/bin/", "755"],
+]

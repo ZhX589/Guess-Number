@@ -1,6 +1,6 @@
 [package]
 name = "guessing_game"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 authors = ["ZhX589 ZhX589@outlook.com"]
 description = "A simple guessing game"
@@ -20,3 +20,15 @@ debug = true            # 保留调试信息
 opt-level = 3           # 最高优化，但编译慢
 lto = "thin"           # 链接时优化，减小二进制体积
 codegen-units = 1      # 更好的优化，但编译更慢
+
+# deb 包配置
+[package.metadata.deb]
+maintainer = "ZhX589 <ZhX589@outlook.com>"
+copyright = "2026, ZhX589"
+license-file = ["LICENSE", "usr/share/doc/guessing_game/LICENSE"]
+depends = "libc6"
+section = "games"
+priority = "optional"
+assets = [
+    ["target/release/guessing_game", "usr/bin/", "755"],
+]
